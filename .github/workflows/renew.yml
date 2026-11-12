@@ -1,0 +1,45 @@
+name: Perpanjang daftar pencabutan
+
+on:
+  schedule:
+    - cron: '17 1 * * *' # setiap hari 08:17 WIB
+  push:
+    branches: [main]
+    paths: ['revocations.signed']
+  workflow_dispatch: {}
+
+concurrency:
+  group: renew
+  cancel-in-progress: false
+
+jobs:
+  renew:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Tandatangani timestamp baru
+        run: node scripts/renew.mjs
+        env:
+          FRESHNESS_KEY: ${{ secrets.FRESHNESS_KEY }}
+      # Commit harian menjaga jadwal tetap aktif (GitHub menonaktifkan cron di repo tanpa aktivitas 60 hari).
+      - name: Commit trust.json
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add hauling/trust.json
+          git commit -m "Perpanjang timestamp $(date -u +%F)" || echo 'Tidak ada perubahan'
+          git push
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: .
+      - uses: actions/deploy-pages@v4
