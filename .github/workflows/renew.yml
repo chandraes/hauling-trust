@@ -17,10 +17,9 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-      pages: write
-      id-token: write
-    environment:
-      name: github-pages
+      pages: read
+    outputs:
+      artifact_id: ${{ steps.upload.outputs.artifact_id }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -39,7 +38,44 @@ jobs:
           git commit -m "Perpanjang timestamp $(date -u +%F)" || echo 'Tidak ada perubahan'
           git push
       - uses: actions/configure-pages@v5
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@v4
+        id: upload
         with:
           path: .
+
+  deploy:
+    needs: renew
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+    steps:
+      - name: Tunggu artefak GitHub Pages tersedia
+        id: wait_for_artifact
+        timeout-minutes: 2
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PAGES_ARTIFACT_ID: ${{ needs.renew.outputs.artifact_id }}
+        run: |
+          if [[ ! "$PAGES_ARTIFACT_ID" =~ ^[0-9]+$ ]]; then
+            echo "::error::ID artefak github-pages tidak tersedia."
+            exit 1
+          fi
+
+          for attempt in {1..12}; do
+            if artifact_id=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts?name=github-pages" \
+              --jq '.artifacts[] | select(.expired == false) | .id') &&
+              [[ "$artifact_id" == "$PAGES_ARTIFACT_ID" ]]; then
+              exit 0
+            fi
+            if [[ "$attempt" -lt 12 ]]; then
+              sleep 5
+            fi
+          done
+
+          echo "::error::Artefak github-pages belum tersedia untuk deployment."
+          exit 1
       - uses: actions/deploy-pages@v4
